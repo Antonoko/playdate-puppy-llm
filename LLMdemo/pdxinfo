@@ -1,0 +1,6 @@
+name=LLM demo
+author=haru
+description=a LLM chat demo
+bundleID=com.haru.llmdemo
+version=1.0
+buildNumber=1
