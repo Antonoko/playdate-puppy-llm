@@ -1,0 +1,14 @@
+{
+    "msglist": [
+        {
+            "name" : "You",
+            "streaming" : false,
+            "content" : ["f","u"]
+        },
+        {
+            "name" : "Puppy",
+            "streaming" : true,
+            "content" : ["啊","啊","啊","\n","啊","啊","啊","啊","啊","啊","啊","啊","啊","啊","啊","草"]
+        }
+    ]
+}

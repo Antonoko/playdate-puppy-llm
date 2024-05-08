@@ -1,6 +1,6 @@
-name=LLM demo
+name=puppy
 author=haru
 description=a LLM chat demo
-bundleID=com.haru.llmdemo
+bundleID=com.haru.puppy
 version=1.0
 buildNumber=1
