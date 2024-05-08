@@ -40,3 +40,5 @@ luac.out
 *.hex
 
 puppy.pdx
+test_fetch.pdx
+test_json.pdx

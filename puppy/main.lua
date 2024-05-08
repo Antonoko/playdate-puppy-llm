@@ -14,11 +14,11 @@ local screenHeight <const> = playdate.display.getHeight()
 
 ----------------------------------------------------
 
-local lineheight_factor <const> = 1.4
+local LINEHEIGHT_FACTOR <const> = 1.4
 
 local STAGE = {}
 local stage_manager = "puppy"
-local stage_manager_choose = ""
+local stage_manager_choose = "puppy"
 
 local FONT = {
     CabinetGroteskThin16 = {
@@ -35,6 +35,10 @@ local FONT = {
     },
 }
 
+local time_str_lazy
+local time_query_cnt = 1000
+local battery_str_lazy
+local battery_query_cnt = 1000
 local icon_puppy = gfx.image.new("img/icon-puppy")
 local tip_btn = gfx.image.new("img/tip-btn")
 local tip_btn_sprite = gfx.sprite.new(tip_btn)
@@ -94,11 +98,12 @@ function PuppyCommunication:_initOwnProps()
 	self.portalVersion = nil
 end
 
-function PuppyCommunication:get_llm_response(msg_send)
+function PuppyCommunication:get_llm_response(msg_send, new_chat)
     self:_createObject(json.encode({
         name = 'llm-fetch',
         data = {
-            msg = string.format(msg_send)
+            msg = string.format(msg_send),
+            new_chat = new_chat
         }
     }))
 end
@@ -237,6 +242,15 @@ end
 
 function render_battery()
     --FIXME lazy update
+    if battery_query_cnt < 30 then
+        battery_query_cnt += 1
+        return
+    end
+    battery_query_cnt = 0
+    if pd.getBatteryPercentage() == battery_str_lazy then
+        return
+    end
+
     local image = gfx.image.new(screenWidth,20)
     gfx.pushContext(image)
         gfx.setFont(FONT["CabinetGroteskThin16"].font)
@@ -246,19 +260,57 @@ function render_battery()
         gfx.setColor(playdate.graphics.kColorWhite)
         gfx.fillRect(screenWidth/2+6, 3, math.floor(16*(pd.getBatteryPercentage()/100)), 7)
     gfx.popContext()
-    battery_text_sprite:setImage(image)
+    battery_text_sprite:setImage(image:rotatedImage(90))
+    battery_str_lazy = pd.getBatteryPercentage()
 end
 
 
 function render_time()
-    --FIXME lazy update
+    if time_query_cnt < 30 then
+        time_query_cnt += 1
+        return
+    end
+    time_query_cnt = 0
+    if get_time_now_as_string() == time_str_lazy then
+        return
+    end
     local image = gfx.image.new(screenWidth,64)
     gfx.pushContext(image)
         gfx.setFont(FONT["CabinetGroteskRegular60"].font)
         gfx.setImageDrawMode(playdate.graphics.kDrawModeFillWhite)
         gfx.drawTextAligned(get_time_now_as_string(), screenWidth/2, 0, kTextAlignment.center)
     gfx.popContext()
-    time_sprite:setImage(image)
+    time_sprite:setImage(image:rotatedImage(90))
+    time_str_lazy = get_time_now_as_string()
+end
+
+
+function init_calc_chat_img(response_json)
+    local height = 0
+    for key, section in pairs(response_json["msglist"]) do
+        gfx.setFont(FONT["Roobert11Medium"].font)
+        height += gfx.getTextSize("M") * LINEHEIGHT_FACTOR +6
+        gfx.setFont(FONT["SourceHanSansCNM20px"].font)
+        local max_zh_char_size = gfx.getTextSize("啊")
+        local lineheight = max_zh_char_size * LINEHEIGHT_FACTOR
+        local current_x = img_chat_draw_coord_x_offset
+        for key, char in pairs(section.content) do
+            if char == "\n" then
+                current_x = img_chat_draw_coord_x_offset
+                height += lineheight
+            else
+                current_x += gfx.getTextSize(char)
+            end
+            if current_x > 320 - max_zh_char_size then
+                current_x = img_chat_draw_coord_x_offset
+                height += lineheight
+            end
+        end
+        height += lineheight
+        height += 20 --buffer
+    end
+
+    img_chat_buffer = gfx.image.new(screenWidth, height)
 end
 
 function render_chat(response_json)
@@ -274,7 +326,7 @@ function render_chat(response_json)
         gfx.setFont(FONT["SourceHanSansCNM20px"].font)
         gfx.setImageDrawMode(playdate.graphics.kDrawModeFillWhite)
         local max_zh_char_size = gfx.getTextSize("啊")
-        local lineheight = max_zh_char_size * lineheight_factor
+        local lineheight = max_zh_char_size * LINEHEIGHT_FACTOR
         for key, char in pairs(content) do
             if char == "\n" then
                 current_x = x
@@ -303,7 +355,8 @@ function render_chat(response_json)
             if string.lower(section.name) == "puppy" then
                 _render_puppy_avatar(8, img_chat_draw_coord_y-8)
             end
-            img_chat_draw_coord_y += gfx.getTextSize("M") * lineheight_factor +6
+            gfx.setFont(FONT["Roobert11Medium"].font)
+            img_chat_draw_coord_y += gfx.getTextSize("M") * LINEHEIGHT_FACTOR +6
             if not section.streaming then
                 img_chat_draw_coord_y += _render_chat_content(section.content, img_chat_draw_coord_x + img_chat_draw_coord_x_offset, img_chat_draw_coord_y)
                 img_chat_draw_coord_y += 36
@@ -335,7 +388,7 @@ function render_chat_stream_part(response_json)
         end
         gfx.setFont(FONT["SourceHanSansCNM20px"].font)
         local max_zh_char_size = gfx.getTextSize("啊")
-        local lineheight = max_zh_char_size * lineheight_factor
+        local lineheight = max_zh_char_size * LINEHEIGHT_FACTOR
         local char = content[img_chat_streaming_text_char_index]
         gfx.setImageDrawMode(playdate.graphics.kDrawModeCopy)
 
@@ -361,6 +414,10 @@ function render_chat_stream_part(response_json)
             img_chat_streaming_text_x = 0
             img_chat_streaming_text_y += lineheight
         end
+
+        if img_chat_streaming_text_y_last > screenHeight then
+            chat_sprite:moveTo(0, -(img_chat_streaming_text_y_last-screenHeight)-30)
+        end
     end
 
     gfx.pushContext(img_chat_buffer)
@@ -376,16 +433,19 @@ end
 
 
 function update_chat_render(response_json)
-
     if not history_chat_render_done then
+        init_calc_chat_img(response_json)
         render_chat(response_json)
         history_chat_render_done = true
     end
 
     if not streaming_chat_render_done then
+        -- local img_x, img_y = img_chat_buffer:getSize()
+        -- if img_y > screenHeight then
+        --     chat_sprite:moveTo(0, -(img_y-screenHeight)-30)
+        -- end
         render_chat_stream_part(response_json)
     end
-
 end
 
 function reset_chat_render()
@@ -411,18 +471,21 @@ STAGE["puppy"] = function()
     render_battery()
 end
 
--- render_chat()
+
 STAGE["terminal"] = function()
     puppy_communication:update()
-    -- render_chat_stream_part()
+
     if msg_received ~= nil then
         update_chat_render(msg_received)
     end
 
     if pd.buttonJustPressed(pd.kButtonA) then
-        -- puppy_communication:get_llm_response("hellooooo")
-        local str = "{\"msglist\":[{\"name\":\"You\",\"streaming\":false,\"content\":[\"f\",\"u\"]},{\"name\":\"Puppy\",\"streaming\":true,\"content\":[\"啊\",\"啊\",\"啊\",\"\n\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"草\"]}]}"
+        -- puppy_communication:get_llm_response("hellooooo", false)
+        local str = "{\"msglist\":[{\"name\":\"You\",\"streaming\":False,\"content\":[\"h\",\"i\",\"\",\"你\",\"好\",\"啊\"]},{\"name\":\"Puppy\",\"streaming\":True,\"content\":[\"H\",\"i\",\"\",\"t\",\"h\",\"e\",\"r\",\"e\",\"!\",\"\",\"I\",\"\"\",\"m\",\"\",\"L\",\"L\",\"a\",\"M\",\"A\",\",\",\"\",\"a\",\"n\",\"\",\"A\",\"I\",\"\",\"a\",\"s\",\"s\",\"i\",\"s\",\"t\",\"a\",\"n\",\"t\",\"\",\"d\",\"e\",\"v\",\"e\",\"l\",\"o\",\"p\",\"e\",\"d\",\"\",\"b\",\"y\",\"\",\"M\",\"e\",\"t\",\"a\",\"\",\"A\",\"I\",\"\",\"t\",\"h\",\"a\",\"t\",\"\",\"c\",\"a\",\"n\",\"\",\"u\",\"n\",\"d\",\"e\",\"r\",\"s\",\"t\",\"a\",\"n\",\"d\",\"\",\"a\",\"n\",\"d\",\"\",\"r\",\"e\",\"s\",\"p\",\"o\",\"n\",\"d\",\"\",\"t\",\"o\",\"\",\"h\",\"u\",\"m\",\"a\",\"n\",\"\",\"i\",\"n\",\"p\",\"u\",\"t\",\"\",\"i\",\"n\",\"\",\"a\",\"\",\"c\",\"o\",\"n\",\"v\",\"e\",\"r\",\"s\",\"a\",\"t\",\"i\",\"o\",\"n\",\"a\",\"l\",\"\",\"m\",\"a\",\"n\",\"n\",\"e\",\"r\",\".\",\"\",\"I\",\"\"\",\"m\",\"\",\"n\",\"o\",\"t\",\"\",\"a\",\"\",\"h\",\"u\",\"m\",\"a\",\"n\",\",\",\"\",\"b\",\"u\",\"t\",\"\",\"a\",\"\",\"c\",\"o\",\"m\",\"p\",\"u\",\"t\",\"e\",\"r\",\"\",\"p\",\"r\",\"o\",\"g\",\"r\",\"a\",\"m\",\"\",\"d\",\"e\",\"s\",\"i\",\"g\",\"n\",\"e\",\"d\",\"\",\"t\",\"o\",\"\",\"s\",\"i\",\"m\",\"u\",\"l\",\"a\",\"t\",\"e\",\"\",\"c\",\"o\",\"n\",\"v\",\"e\",\"r\",\"s\",\"a\",\"t\",\"i\",\"o\",\"n\",\"\",\"a\",\"n\",\"d\",\"\",\"a\",\"n\",\"s\",\"w\",\"e\",\"r\",\"\",\"q\",\"u\",\"e\",\"s\",\"t\",\"i\",\"o\",\"n\",\"s\",\"\",\"t\",\"o\",\"\",\"t\",\"h\",\"e\",\"\",\"b\",\"e\",\"s\",\"t\",\"\",\"o\",\"f\",\"\",\"m\",\"y\",\"\",\"a\",\"b\",\"i\",\"l\",\"i\",\"t\",\"i\",\"e\",\"s\",\".\",\"\",\"I\",\"'\",\"m\",\"\",\"h\",\"e\",\"r\",\"e\",\"\",\"t\",\"o\",\"\",\"h\",\"e\",\"l\",\"p\",\"\",\"a\",\"n\",\"d\",\"\",\"c\",\"h\",\"a\",\"t\",\"\",\"w\",\"i\",\"t\",\"h\",\"\",\"y\",\"o\",\"u\",\",\",\"\",\"s\",\"o\",\"\",\"f\",\"e\",\"e\",\"l\",\"\",\"f\",\"r\",\"e\",\"e\",\"\",\"t\",\"o\",\"\",\"a\",\"s\",\"k\",\"\",\"m\",\"e\",\"\",\"a\",\"n\",\"y\",\"t\",\"h\",\"i\",\"n\",\"g\",\"!\"]}]}"
+        print(str)
+        -- local str = "{\"msglist\":[{\"name\":\"You\",\"streaming\":false,\"content\":[\"f\",\"u\"]},{\"name\":\"Puppy\",\"streaming\":true,\"content\":[\"啊\",\"啊\",\"啊\",\"\n\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"啊\",\"草\"]}]}"
         msg_received = json.decode(str)
+        print(msg_received)
     end
 
     if pd.buttonJustPressed(pd.kButtonB) then
@@ -433,8 +496,12 @@ end
 ----------------------------------------------
 
 function exit_terminal()
+    ---FIXME clean all icon
     chat_sprite:remove()
     tip_btn_sprite:remove()
+    for key, value in pairs(icon_utils) do
+        value.sprite:remove()
+    end
 end
 
 function exit_puppy()
@@ -444,23 +511,24 @@ function exit_puppy()
 end
 
 function enter_terminal()
-    chat_sprite:add()
+    for key, value in pairs(icon_utils) do
+        value.sprite:add()
+    end
     chat_sprite:setCenter(0,0)
     chat_sprite:moveTo(0, 0)
-    tip_btn_sprite:add()
+    chat_sprite:add()
     tip_btn_sprite:setCenter(0,0)
     tip_btn_sprite:moveTo(0, screenHeight-30)
+    tip_btn_sprite:add()
 end
 
 function enter_puppy()
     battery_text_sprite:add()
     battery_text_sprite:moveTo((screenWidth/2)+110, screenHeight/2)
-    battery_text_sprite:setRotation(90)
     time_sprite:add()
     time_sprite:moveTo((screenWidth/2)+70, screenHeight/2)
-    time_sprite:setRotation(90)
     t_puppy_sprite:add()
-    t_puppy_sprite:moveTo((screenWidth/2)+15, screenHeight/2)
+    t_puppy_sprite:moveTo((screenWidth/2)+25, screenHeight/2)
     t_puppy_sprite:setRotation(90)
 end
 
