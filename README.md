@@ -22,7 +22,7 @@ This is an LLM interface that pays homage to rabbit r1 on Playdate.
 5. Run `python server.py`, start the service (By default it will run at http://127.0.0.1:5001/llmproxy)
 
 ### Playdate setting
-1. Download pdx in release and sideload it to your playdate
+1. Download pdx in [release](https://github.com/Antonoko/playdate-puppy-llm/releases) and sideload it to your playdate
 2. Open puppy on playdate
 3. Connect playdate to the computer via USB, open [https://pdportal.net/](https://pdportal.net/) on the desktop browser, and click connect (make sure the playdate emulator is not opened, etc. to occupy its USB port program of)
 4. If everything goes well, communication should be possible!
