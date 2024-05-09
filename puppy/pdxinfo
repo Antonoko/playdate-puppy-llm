@@ -3,4 +3,5 @@ author=haru
 description=a LLM chat demo
 bundleID=com.haru.puppy
 version=1.0
-buildNumber=1
+buildNumber=2
+imagePath=img/launcher
