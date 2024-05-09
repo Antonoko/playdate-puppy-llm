@@ -66,11 +66,10 @@ function Example04Fetch:_updateReady()
 
 	if playdate.buttonJustPressed(playdate.kButtonA) then
 		self:_createObject(json.encode({
-			name = '04-fetch',
+			name = 'llm-fetch',
 			data = {
-				hello = 'from pdportal ' .. self.portalVersion,
-				-- Make sure largeish payloads (over 255 chars) can be sent/received
-				padding = 'abcdefghijklmnopanicqrstuvwxyzABCDEFGHIJKLMNOPANICQRSTUVWXYZ0123456789abcdefghijklmnopanicqrstuvwxyzABCDEFGHIJKLMNOPANICQRSTUVWXYZ0123456789abcdefghijklmnopanicqrstuvwxyzABCDEFGHIJKLMNOPANICQRSTUVWXYZ0123456789abcdefghijklmnopanicqrstuvwxyzABCDEFGHIJKLMNOPANICQRSTUVWXYZ0123456789abcdefghijklmnopanicqrstuvwxyzABCDEFGHIJKLMNOPANICQRSTUVWXYZ0123456789'
+				msg = "hello",
+				new_chat = false
 			}
 		}))
 	elseif playdate.buttonJustPressed(playdate.kButtonB) then
@@ -127,7 +126,7 @@ function Example04Fetch:_createObject(body)
 
 			if responseDetails.status == 200 then
 				self:_setResponseImage(responseText)
-				self.objectId = responseJson.id
+				-- self.objectId = responseJson.id
 			else
 				self:_handleError(responseText)
 			end

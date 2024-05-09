@@ -1,4 +1,5 @@
 import './pdportal'
+import 'ime'
 
 import 'CoreLibs/graphics'
 import "CoreLibs/ui"
@@ -12,13 +13,14 @@ local gfx <const> = playdate.graphics
 local screenWidth <const> = playdate.display.getWidth()
 local screenHeight <const> = playdate.display.getHeight()
 
+local zh_ime = IME()
 ----------------------------------------------------
 
 local LINEHEIGHT_FACTOR <const> = 1.4
 
-local STAGE = {}
-local stage_manager = "puppy"
-local stage_manager_choose = "puppy"
+local P_STAGE = {}
+local p_stage_manager = "puppy"
+local p_stage_manager_choose = "puppy"
 
 local FONT = {
     CabinetGroteskThin16 = {
@@ -33,6 +35,18 @@ local FONT = {
     Roobert11Medium = {
         font = gfx.font.new('font/Roobert-11-Medium')
     },
+    AshevilleSans12LightOblique = {
+        font = gfx.font.new('font/Asheville-Sans-12-Light-Oblique')
+    },
+}
+
+local SFX = {
+    selection = {
+        sound = pd.sound.fileplayer.new("ime_src/sound/selection")
+    },
+    key = {
+        sound = pd.sound.fileplayer.new("ime_src/sound/key")
+    }
 }
 
 local time_str_lazy
@@ -49,9 +63,12 @@ local i_battery_icon = gfx.image.new("img/icon-battery")
 local time_sprite = gfx.sprite.new()
 local battery_text_sprite = gfx.sprite.new()
 local chat_sprite = gfx.sprite.new()
+local chat_sprite_y_offset = 0
 local chat_pointer = gfx.imagetable.new("img/pointer")
 local chat_pointer_delay_cnt = 0
 local chat_pointer_delay_times <const> = 0
+local chat_user_input
+local start_new_chat_trigger = false
 
 local icon_utils = {
     no_signal = {
@@ -59,6 +76,9 @@ local icon_utils = {
     },
     loading = {
         sprite = gfx.sprite.new(gfx.image.new("img/icon-loading"))
+    },
+    error = {
+        sprite = gfx.sprite.new(gfx.image.new("img/icon-error"))
     }
 }
 
@@ -81,7 +101,9 @@ local server_address = 'http://127.0.0.1:5001/mypostendpoint'
 
 local PdPortal <const> = PdPortal
 local PortalCommand <const> = PdPortal.PortalCommand
+local chat_dialog_table = {}
 local msg_received, msg_received_lazy
+local state_wait_respond = false
 
 class('PuppyCommunication').extends(PdPortal)
 local PuppyCommunication <const> = PuppyCommunication
@@ -99,10 +121,11 @@ function PuppyCommunication:_initOwnProps()
 end
 
 function PuppyCommunication:get_llm_response(msg_send, new_chat)
+    self:log("get_llm_response", msg_send)
     self:_createObject(json.encode({
         name = 'llm-fetch',
         data = {
-            msg = string.format(msg_send),
+            msg = msg_send,
             new_chat = new_chat
         }
     }))
@@ -115,10 +138,12 @@ function PuppyCommunication:update()
 		if self.isSendingRequest then
             icon_utils.no_signal.sprite:remove()
             icon_utils.loading.sprite:add()
+            icon_utils.error.sprite:remove()
             --fetching
 		else
             icon_utils.no_signal.sprite:remove()
             icon_utils.loading.sprite:remove()
+            icon_utils.error.sprite:remove()
 			--normal
 		end
 	else
@@ -130,6 +155,35 @@ end
 
 function PuppyCommunication:deliver_msg(responseText)
     msg_received = json.decode(responseText)
+    if msg_received == nil then
+        msg_received = {
+            usermsg = {
+                "Received failed."
+            },
+            llmmsg = {
+                responseText
+            }
+        }
+    end
+
+    local user_chat_table = {
+        name = "You",
+        streaming = false,
+        content = msg_received["usermsg"]
+    }
+    local llm_chat_table = {
+        name = "Puppy",
+        streaming = true,
+        content = msg_received["llmmsg"]
+    }
+    table.insert(chat_dialog_table, user_chat_table)
+    table.insert(chat_dialog_table, llm_chat_table)
+    for key, char in pairs(chat_dialog_table) do
+        chat_dialog_table[key]["streaming"] = false
+    end
+    chat_dialog_table[#chat_dialog_table]["streaming"] = true
+    state_wait_respond = false
+    reset_chat_render()
 end
 
 function PuppyCommunication:_createObject(body)
@@ -163,7 +217,8 @@ end
 
 function PuppyCommunication:_handleError(errorMessage)
 	self.isSendingRequest = false
-    self:deliver_msg('{}')
+    -- self:deliver_msg("{\"msglist\":[{\"name\":\"System\",\"streaming\":false,\"content\":[\"error:\",\""..errorMessage.."\"]}]}")
+    icon_utils.error.sprite:add()
 	-- self:deliver_msg('Error: ' .. errorMessage)
 end
 
@@ -238,7 +293,31 @@ function shallowCopy(original)
     return copy
 end
 
+function findNextSpaceIndex(tbl, index)
+    if index >= #tbl then
+        return -1
+    end
+    for i = index + 1, #tbl do
+        if tbl[i] == " " then
+            return i
+        end
+    end
+    return -1
+  end
+
 --------------------------------------------
+
+function reset_dialog()
+    chat_dialog_table = {
+        {
+            name = "Puppy",
+            streaming = false,
+            content = {
+                "Hi, nice to see you!"
+            }
+        }
+    }
+end
 
 function render_battery()
     --FIXME lazy update
@@ -287,8 +366,8 @@ end
 
 function init_calc_chat_img(response_json)
     local height = 0
-    for key, section in pairs(response_json["msglist"]) do
-        gfx.setFont(FONT["Roobert11Medium"].font)
+    for key, section in pairs(response_json) do
+        gfx.setFont(FONT["AshevilleSans12LightOblique"].font)
         height += gfx.getTextSize("M") * LINEHEIGHT_FACTOR +6
         gfx.setFont(FONT["SourceHanSansCNM20px"].font)
         local max_zh_char_size = gfx.getTextSize("啊")
@@ -299,6 +378,19 @@ function init_calc_chat_img(response_json)
                 current_x = img_chat_draw_coord_x_offset
                 height += lineheight
             else
+                if char == " " then  --word break
+                    local next_space_index = findNextSpaceIndex(section.content, key)
+                    local word_width = 0
+                    if next_space_index > 1 and next_space_index > key then
+                        for i = key+1, next_space_index do
+                            word_width += gfx.getTextSize(section.content[i])
+                        end
+                        if current_x + word_width > 320 - max_zh_char_size then
+                            current_x = img_chat_draw_coord_x_offset
+                            height += lineheight
+                        end
+                    end
+                end
                 current_x += gfx.getTextSize(char)
             end
             if current_x > 320 - max_zh_char_size then
@@ -315,7 +407,7 @@ end
 
 function render_chat(response_json)
     function _render_name(name, x, y)
-        gfx.setFont(FONT["Roobert11Medium"].font)
+        gfx.setFont(FONT["AshevilleSans12LightOblique"].font)
         gfx.setImageDrawMode(playdate.graphics.kDrawModeFillWhite)
         gfx.drawTextAligned(name, x, y, kTextAlignment.left)
     end
@@ -332,11 +424,25 @@ function render_chat(response_json)
                 current_x = x
                 y_offset_callback += lineheight
             else
+                if char == " " then  --word break
+                    local next_space_index = findNextSpaceIndex(content, key)
+                    local word_width = 0
+                    if next_space_index > 1 and next_space_index > key then
+                        for i = key+1, next_space_index do
+                            word_width += gfx.getTextSize(content[i])
+                        end
+                        if current_x + word_width > 320 - max_zh_char_size + img_chat_draw_coord_x_offset then
+                            current_x = x
+                            y_offset_callback += lineheight
+                        end
+                    end
+                end
+                
                 gfx.drawTextAligned(char, current_x, y_offset_callback+y, kTextAlignment.left)
                 current_x += gfx.getTextSize(char)
             end
             
-            if current_x > 320 - max_zh_char_size then
+            if current_x > 320 - max_zh_char_size + img_chat_draw_coord_x_offset then
                 current_x = x
                 y_offset_callback += lineheight
             end
@@ -350,12 +456,12 @@ function render_chat(response_json)
     end
 
     gfx.pushContext(img_chat_buffer)
-        for key, section in pairs(response_json["msglist"]) do
+        for key, section in pairs(response_json) do
             _render_name(section.name, img_chat_draw_coord_x + img_chat_draw_coord_x_offset, img_chat_draw_coord_y)
             if string.lower(section.name) == "puppy" then
                 _render_puppy_avatar(8, img_chat_draw_coord_y-8)
             end
-            gfx.setFont(FONT["Roobert11Medium"].font)
+            gfx.setFont(FONT["AshevilleSans12LightOblique"].font)
             img_chat_draw_coord_y += gfx.getTextSize("M") * LINEHEIGHT_FACTOR +6
             if not section.streaming then
                 img_chat_draw_coord_y += _render_chat_content(section.content, img_chat_draw_coord_x + img_chat_draw_coord_x_offset, img_chat_draw_coord_y)
@@ -400,11 +506,26 @@ function render_chat_stream_part(response_json)
             img_chat_streaming_text_x = 0
             img_chat_streaming_text_y += lineheight
         else
+            if char == " " then  --word break
+                local next_space_index = findNextSpaceIndex(content, img_chat_streaming_text_char_index)
+                local word_width = 0
+                if next_space_index > 1 and next_space_index > img_chat_streaming_text_char_index then
+                    for i = img_chat_streaming_text_char_index+1, next_space_index do
+                        word_width += gfx.getTextSize(content[i])
+                    end
+                    if img_chat_streaming_text_x + word_width > 320 - max_zh_char_size then
+                        img_chat_streaming_text_x = 0
+                        img_chat_streaming_text_y += lineheight
+                    end
+                end
+            end
+
             gfx.setImageDrawMode(playdate.graphics.kDrawModeCopy)
             chat_pointer:drawImage(1, img_chat_streaming_text_x + img_chat_draw_coord_x_offset + gfx.getTextSize(char), img_chat_streaming_text_y)
             gfx.setImageDrawMode(playdate.graphics.kDrawModeFillWhite)
             gfx.drawTextAligned(char, img_chat_streaming_text_x + img_chat_draw_coord_x_offset, img_chat_streaming_text_y, kTextAlignment.left)
             img_chat_streaming_text_x += gfx.getTextSize(char)
+            SFX.selection.sound:play()
         end
         
         img_chat_streaming_text_x_last = img_chat_streaming_text_x
@@ -417,11 +538,12 @@ function render_chat_stream_part(response_json)
 
         if img_chat_streaming_text_y_last > screenHeight - 60 then
             chat_sprite:moveTo(0, -(img_chat_streaming_text_y_last-screenHeight)-60)
+            chat_sprite_y_offset = -(img_chat_streaming_text_y_last-screenHeight)-60
         end
     end
 
     gfx.pushContext(img_chat_buffer)
-        for key, section in pairs(response_json["msglist"]) do
+        for key, section in pairs(response_json) do
             if section.streaming then
                 _render_chat_single_char(section.content)
             end
@@ -440,10 +562,6 @@ function update_chat_render(response_json)
     end
 
     if not streaming_chat_render_done then
-        -- local img_x, img_y = img_chat_buffer:getSize()
-        -- if img_y > screenHeight then
-        --     chat_sprite:moveTo(0, -(img_y-screenHeight)-30)
-        -- end
         render_chat_stream_part(response_json)
     end
 end
@@ -451,7 +569,8 @@ end
 function reset_chat_render()
     history_chat_render_done = false
     streaming_chat_render_done = false
-    img_chat_buffer = gfx.image.new(400, 2000)
+    img_chat_buffer = gfx.image.new(400, 240)
+    chat_sprite:setImage(img_chat_buffer)
     img_chat_draw_coord_x_offset = 60
     img_chat_draw_coord_x = 0
     img_chat_draw_coord_y = 0
@@ -462,34 +581,72 @@ function reset_chat_render()
     img_chat_streaming_text_y_last = 0
 end
 
-
---------------------------------------------
-
-STAGE["puppy"] = function()
-    t_puppy_sprite:setImage(t_puppy_animation:image())
-    render_time()
-    render_battery()
+function scroll_chat()
+    local change, acceleratedChange = playdate.getCrankChange()
+    local buffer_img_width, buffer_img_height = img_chat_buffer:getSize()
+    if change ~= 0 then
+        chat_sprite_y_offset += -change
+        if chat_sprite_y_offset < -(buffer_img_height - 150) then
+            chat_sprite_y_offset = -(buffer_img_height - 150)
+        elseif chat_sprite_y_offset > 5 then
+            chat_sprite_y_offset = 5
+        end
+        chat_sprite:moveTo(chat_sprite.x, chat_sprite_y_offset)
+    end
 end
 
 
-STAGE["terminal"] = function()
+--------------------------------------------
+
+P_STAGE["puppy"] = function()
+    t_puppy_sprite:setImage(t_puppy_animation:image())
+    render_time()
+    render_battery()
+    switch_rotation_mode()
+end
+
+
+P_STAGE["terminal"] = function()
+    switch_rotation_mode()
     puppy_communication:update()
+    scroll_chat()
+    
 
-    if msg_received ~= nil then
-        update_chat_render(msg_received)
+    if chat_dialog_table ~= nil and #chat_dialog_table ~= 0 and state_wait_respond == false then
+        update_chat_render(chat_dialog_table)
     end
 
-    if pd.buttonJustPressed(pd.kButtonA) then
-        -- puppy_communication:get_llm_response("hellooooo", false)
-        -- local str = "{\"msglist\":[{\"name\":\"You\",\"streaming\":False,\"content\":[\"h\",\"i\",\"\",\"你\",\"好\",\"啊\"]},{\"name\":\"Puppy\",\"streaming\":True,\"content\":[\"H\",\"i\",\"\",\"t\",\"h\",\"e\",\"r\",\"e\",\"!\",\"\",\"I\",\"\"\",\"m\",\"\",\"L\",\"L\",\"a\",\"M\",\"A\",\",\",\"\",\"a\",\"n\",\"\",\"A\",\"I\",\"\",\"a\",\"s\",\"s\",\"i\",\"s\",\"t\",\"a\",\"n\",\"t\",\"\",\"d\",\"e\",\"v\",\"e\",\"l\",\"o\",\"p\",\"e\",\"d\",\"\",\"b\",\"y\",\"\",\"M\",\"e\",\"t\",\"a\",\"\",\"A\",\"I\",\"\",\"t\",\"h\",\"a\",\"t\",\"\",\"c\",\"a\",\"n\",\"\",\"u\",\"n\",\"d\",\"e\",\"r\",\"s\",\"t\",\"a\",\"n\",\"d\",\"\",\"a\",\"n\",\"d\",\"\",\"r\",\"e\",\"s\",\"p\",\"o\",\"n\",\"d\",\"\",\"t\",\"o\",\"\",\"h\",\"u\",\"m\",\"a\",\"n\",\"\",\"i\",\"n\",\"p\",\"u\",\"t\",\"\",\"i\",\"n\",\"\",\"a\",\"\",\"c\",\"o\",\"n\",\"v\",\"e\",\"r\",\"s\",\"a\",\"t\",\"i\",\"o\",\"n\",\"a\",\"l\",\"\",\"m\",\"a\",\"n\",\"n\",\"e\",\"r\",\".\",\"\",\"I\",\"\"\",\"m\",\"\",\"n\",\"o\",\"t\",\"\",\"a\",\"\",\"h\",\"u\",\"m\",\"a\",\"n\",\",\",\"\",\"b\",\"u\",\"t\",\"\",\"a\",\"\",\"c\",\"o\",\"m\",\"p\",\"u\",\"t\",\"e\",\"r\",\"\",\"p\",\"r\",\"o\",\"g\",\"r\",\"a\",\"m\",\"\",\"d\",\"e\",\"s\",\"i\",\"g\",\"n\",\"e\",\"d\",\"\",\"t\",\"o\",\"\",\"s\",\"i\",\"m\",\"u\",\"l\",\"a\",\"t\",\"e\",\"\",\"c\",\"o\",\"n\",\"v\",\"e\",\"r\",\"s\",\"a\",\"t\",\"i\",\"o\",\"n\",\"\",\"a\",\"n\",\"d\",\"\",\"a\",\"n\",\"s\",\"w\",\"e\",\"r\",\"\",\"q\",\"u\",\"e\",\"s\",\"t\",\"i\",\"o\",\"n\",\"s\",\"\",\"t\",\"o\",\"\",\"t\",\"h\",\"e\",\"\",\"b\",\"e\",\"s\",\"t\",\"\",\"o\",\"f\",\"\",\"m\",\"y\",\"\",\"a\",\"b\",\"i\",\"l\",\"i\",\"t\",\"i\",\"e\",\"s\",\".\",\"\",\"I\",\"'\",\"m\",\"\",\"h\",\"e\",\"r\",\"e\",\"\",\"t\",\"o\",\"\",\"h\",\"e\",\"l\",\"p\",\"\",\"a\",\"n\",\"d\",\"\",\"c\",\"h\",\"a\",\"t\",\"\",\"w\",\"i\",\"t\",\"h\",\"\",\"y\",\"o\",\"u\",\",\",\"\",\"s\",\"o\",\"\",\"f\",\"e\",\"e\",\"l\",\"\",\"f\",\"r\",\"e\",\"e\",\"\",\"t\",\"o\",\"\",\"a\",\"s\",\"k\",\"\",\"m\",\"e\",\"\",\"a\",\"n\",\"y\",\"t\",\"h\",\"i\",\"n\",\"g\",\"!\"]}]}"
-        print(str)
-        local str = "{\"msglist\":[{\"name\":\"You\",\"streaming\":false,\"content\":[\"h\",\"i\",\" \",\"你\",\"好\",\"啊\"]},{\"name\":\"Puppy\",\"streaming\":true,\"content\":[\"H\",\"i\",\" \",\"t\",\"h\",\"e\",\"r\",\"e\",\"!\",\" \",\"I\",\"'\",\"m\",\" \",\"L\",\"L\",\"a\",\"M\",\"A\",\",\",\" \",\"a\",\"n\",\" \",\"A\",\"I\",\" \",\"a\",\"s\",\"s\",\"i\",\"s\",\"t\",\"a\",\"n\",\"t\",\" \",\"d\",\"e\",\"v\",\"e\",\"l\",\"o\",\"p\",\"e\",\"d\",\" \",\"b\",\"y\",\" \",\"M\",\"e\",\"t\",\"a\",\" \",\"A\",\"I\",\" \",\"t\",\"h\",\"a\",\"t\",\" \",\"c\",\"a\",\"n\",\" \",\"u\",\"n\",\"d\",\"e\",\"r\",\"s\",\"t\",\"a\",\"n\",\"d\",\" \",\"a\",\"n\",\"d\",\" \",\"r\",\"e\",\"s\",\"p\",\"o\",\"n\",\"d\",\" \",\"t\",\"o\",\" \",\"h\",\"u\",\"m\",\"a\",\"n\",\" \",\"i\",\"n\",\"p\",\"u\",\"t\",\" \",\"i\",\"n\",\" \",\"a\",\" \",\"c\",\"o\",\"n\",\"v\",\"e\",\"r\",\"s\",\"a\",\"t\",\"i\",\"o\",\"n\",\"a\",\"l\",\" \",\"m\",\"a\",\"n\",\"n\",\"e\",\"r\",\".\",\" \",\"I\",\"'\",\"m\",\" \",\"n\",\"o\",\"t\",\" \",\"a\",\" \",\"h\",\"u\",\"m\",\"a\",\"n\",\",\",\" \",\"b\",\"u\",\"t\",\" \",\"a\",\" \",\"c\",\"o\",\"m\",\"p\",\"u\",\"t\",\"e\",\"r\",\" \",\"p\",\"r\",\"o\",\"g\",\"r\",\"a\",\"m\",\" \",\"d\",\"e\",\"s\",\"i\",\"g\",\"n\",\"e\",\"d\",\" \",\"t\",\"o\",\" \",\"s\",\"i\",\"m\",\"u\",\"l\",\"a\",\"t\",\"e\",\" \",\"c\",\"o\",\"n\",\"v\",\"e\",\"r\",\"s\",\"a\",\"t\",\"i\",\"o\",\"n\",\" \",\"a\",\"n\",\"d\",\" \",\"a\",\"n\",\"s\",\"w\",\"e\",\"r\",\" \",\"q\",\"u\",\"e\",\"s\",\"t\",\"i\",\"o\",\"n\",\"s\",\" \",\"t\",\"o\",\" \",\"t\",\"h\",\"e\",\" \",\"b\",\"e\",\"s\",\"t\",\" \",\"o\",\"f\",\" \",\"m\",\"y\",\" \",\"a\",\"b\",\"i\",\"l\",\"i\",\"t\",\"i\",\"e\",\"s\",\".\",\" \",\"I\",\"'\",\"m\",\" \",\"h\",\"e\",\"r\",\"e\",\" \",\"t\",\"o\",\" \",\"h\",\"e\",\"l\",\"p\",\" \",\"a\",\"n\",\"d\",\" \",\"c\",\"h\",\"a\",\"t\",\" \",\"w\",\"i\",\"t\",\"h\",\" \",\"y\",\"o\",\"u\",\",\",\" \",\"s\",\"o\",\" \",\"f\",\"e\",\"e\",\"l\",\" \",\"f\",\"r\",\"e\",\"e\",\" \",\"t\",\"o\",\" \",\"a\",\"s\",\"k\",\" \",\"m\",\"e\",\" \",\"a\",\"n\",\"y\",\"t\",\"h\",\"i\",\"n\",\"g\",\"!\"]}]}"
-        msg_received = json.decode(str)
-        print(msg_received)
+    if pd.buttonJustPressed(pd.kButtonA) and not state_wait_respond and p_stage_manager == "terminal" then
+        p_stage_manager = "terminal_input"
+        zh_ime:startRunning("Chat to Puppy", "en", {}, "en")
+        exit_terminal()
+
+        -- puppy_communication:get_llm_response("hello i am sad", false)
+        -- state_wait_respond = true
+        -- local debug:
+        -- local str = "{\"msglist\":[{\"name\":\"System\",\"streaming\":false,\"content\":[\"error.\"]}]}"
+        -- msg_received = json.decode(str)
     end
 
-    if pd.buttonJustPressed(pd.kButtonB) then
+    if pd.buttonJustPressed(pd.kButtonB) and p_stage_manager == "terminal" then
+        state_wait_respond = false
+        start_new_chat_trigger = true
+        reset_dialog()
         reset_chat_render()
+    end
+end
+
+P_STAGE["terminal_input"] = function()
+    if zh_ime:isRunning() then
+        chat_user_input = zh_ime:update()
+    else
+        if not zh_ime:isUserDiscard() and #chat_user_input > 0 then
+            puppy_communication:get_llm_response(table.concat(chat_user_input, ""), start_new_chat_trigger)
+            start_new_chat_trigger = false
+            state_wait_respond = true
+        end
+        p_stage_manager = "terminal"
+        enter_terminal()
     end
 end
 
@@ -511,15 +668,20 @@ function exit_puppy()
 end
 
 function enter_terminal()
-    for key, value in pairs(icon_utils) do
-        value.sprite:add()
-    end
     chat_sprite:setCenter(0,0)
-    chat_sprite:moveTo(0, 0)
+    chat_sprite:moveTo(0, 5)
     chat_sprite:add()
     tip_btn_sprite:setCenter(0,0)
     tip_btn_sprite:moveTo(0, screenHeight-30)
     tip_btn_sprite:add()
+
+    local icon_offset_x = 0
+    for key, value in pairs(icon_utils) do
+        value.sprite:setCenter(0, 0)
+        value.sprite:moveTo(screenWidth-40-icon_offset_x, 8)
+        icon_offset_x += 30
+        -- value.sprite:add()
+    end
 end
 
 function enter_puppy()
@@ -532,6 +694,39 @@ function enter_puppy()
     t_puppy_sprite:setRotation(90)
 end
 
+function switch_rotation_mode()
+    if pd.buttonIsPressed(pd.kButtonDown) then
+        if not pd.accelerometerIsRunning() then
+            pd.startAccelerometer()
+        end
+        x,y,z = pd.readAccelerometer()
+        if y > x_func(x) and y > x_ne_func(x) then
+            p_stage_manager_choose = "terminal"
+        elseif y < x_func(x) and y > x_ne_func(x) then
+    
+        elseif y < x_func(x) and y < x_ne_func(x) then
+    
+        elseif y > x_func(x) and y < x_ne_func(x) then
+            p_stage_manager_choose = "puppy"
+        end
+
+        if p_stage_manager ~= p_stage_manager_choose then
+            p_stage_manager = p_stage_manager_choose
+            if p_stage_manager == "terminal" then
+                exit_puppy()
+                enter_terminal()
+            elseif p_stage_manager == "puppy" then
+                exit_terminal()
+                enter_puppy()
+            end
+        end
+    end
+
+    if pd.buttonJustReleased(pd.kButtonDown) then
+        pd.stopAccelerometer()
+    end
+end
+
 --------------------------------------------
 
 function init()
@@ -541,14 +736,15 @@ function init()
     gfx.setColor(gfx.kColorBlack)
     gfx.fillRect(0, 0, screenWidth, screenHeight)
 
-    icon_utils.no_signal.sprite:setCenter(0, 0)
-    icon_utils.no_signal.sprite:moveTo(screenWidth-40, 8)
-    icon_utils.loading.sprite:setCenter(0, 0)
-    icon_utils.loading.sprite:moveTo(screenWidth-70, 8)
-
     puppy_communication = PuppyCommunication()
+    reset_dialog()
 
     enter_puppy()
+end
+
+
+function debug()
+
 end
 
 
@@ -556,37 +752,7 @@ function pd.update()
     gfx.sprite.update()
     pd.timer.updateTimers()
 
-    if pd.buttonIsPressed(pd.kButtonA) then
-        if not pd.accelerometerIsRunning() then
-            pd.startAccelerometer()
-        end
-        x,y,z = pd.readAccelerometer()
-        if y > x_func(x) and y > x_ne_func(x) then
-            stage_manager_choose = "terminal"
-        elseif y < x_func(x) and y > x_ne_func(x) then
-    
-        elseif y < x_func(x) and y < x_ne_func(x) then
-    
-        elseif y > x_func(x) and y < x_ne_func(x) then
-            stage_manager_choose = "puppy"
-        end
-    end
-
-    if pd.buttonJustReleased(pd.kButtonA) then
-        pd.stopAccelerometer()
-        if stage_manager ~= stage_manager_choose then
-            stage_manager = stage_manager_choose
-            exit_puppy()
-            exit_terminal()
-            if stage_manager == "terminal" then
-                enter_terminal()
-            elseif stage_manager == "puppy" then
-                enter_puppy()
-            end
-        end
-    end
-
-    STAGE[stage_manager]()
+    P_STAGE[p_stage_manager]()
 end
 
 init()
