@@ -97,7 +97,7 @@ local streaming_chat_render_done = false
 
 --------------------------------------------------------------------------------------
 
-local server_address = 'http://127.0.0.1:5001/mypostendpoint'
+local server_address = 'http://127.0.0.1:5001/llmproxy'
 
 local PdPortal <const> = PdPortal
 local PortalCommand <const> = PdPortal.PortalCommand
@@ -525,7 +525,7 @@ function render_chat_stream_part(response_json)
             gfx.setImageDrawMode(playdate.graphics.kDrawModeFillWhite)
             gfx.drawTextAligned(char, img_chat_streaming_text_x + img_chat_draw_coord_x_offset, img_chat_streaming_text_y, kTextAlignment.left)
             img_chat_streaming_text_x += gfx.getTextSize(char)
-            SFX.selection.sound:play()
+            SFX.selection.key:play()
         end
         
         img_chat_streaming_text_x_last = img_chat_streaming_text_x
@@ -653,7 +653,6 @@ end
 ----------------------------------------------
 
 function exit_terminal()
-    ---FIXME clean all icon
     chat_sprite:remove()
     tip_btn_sprite:remove()
     for key, value in pairs(icon_utils) do

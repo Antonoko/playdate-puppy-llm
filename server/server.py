@@ -96,8 +96,8 @@ def request_llm(
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "https://pdportal.net"}})
 
-@app.route('/mypostendpoint', methods=['POST'])
-def mypostendpoint():
+@app.route('/llmproxy', methods=['POST'])
+def llmproxy():
     global user_dialog
 
     data_received = request.get_json()
@@ -128,14 +128,14 @@ def mypostendpoint():
 
 
 if __name__ == '__main__':
-    app.run(port=5001, debug=True)  # 运行服务，并监听5000端口
+    app.run(port=5001, debug=True)
 
 
 
 
 """
 {
-    "msg" : "你好",
+    "msg" : "hello",
     "new_chat" : false
 }
 """
