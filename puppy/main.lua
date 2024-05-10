@@ -21,6 +21,7 @@ local LINEHEIGHT_FACTOR <const> = 1.4
 local P_STAGE = {}
 local p_stage_manager = "puppy"
 local p_stage_manager_choose = "puppy"
+local puppy_menu = playdate.getSystemMenu()
 
 local FONT = {
     CabinetGroteskThin16 = {
@@ -95,9 +96,58 @@ local img_chat_streaming_text_y_last = 0
 local history_chat_render_done = false
 local streaming_chat_render_done = false
 
+local server_address = 'http://127.0.0.1:5001/llmproxy'
+
 --------------------------------------------------------------------------------------
 
-local server_address = 'http://127.0.0.1:5001/llmproxy'
+-- Get a value from a table if it exists or return a default value
+local get_or_default = function (table, key, expectedType, default)
+	local value = table[key]
+	if value == nil then
+		return default
+	else
+		if type(value) ~= expectedType then
+			print("Warning: value for key " .. key .. " is type " .. type(value) .. " but expected type " .. expectedType)
+			return default
+		end
+		return value
+	end
+end
+
+-- Save the state of the game to the datastore
+function save_state()
+	print("Saving state...")
+	local state = {}
+    state["server_address"] = server_address
+
+	playdate.datastore.write(state)
+	print("State saved!")
+end
+
+
+-- Load the state of the game from the datastore
+function load_state()
+	print("Loading state...")
+	local state = playdate.datastore.read()
+	if state == nil then
+		print("No state found, using defaults")
+        state = {}
+	else
+		print("State found!")
+	end
+
+    server_address = get_or_default(state, "server_address", "string", "http://127.0.0.1:5001/llmproxy")
+end
+
+
+function puppy_sidebar_option()
+    local modeMenuItem, error = puppy_menu:addMenuItem("edit address", function(value)
+        p_stage_manager = "edit_server_address"
+        zh_ime:startRunning("Edit Server Address", "en", stringToTable(server_address), "num")
+    end)
+end
+
+--------------------------------------------------------------------------------------
 
 local PdPortal <const> = PdPortal
 local PortalCommand <const> = PdPortal.PortalCommand
@@ -166,17 +216,11 @@ function PuppyCommunication:deliver_msg(responseText)
         }
     end
 
-    local user_chat_table = {
-        name = "You",
-        streaming = false,
-        content = msg_received["usermsg"]
-    }
     local llm_chat_table = {
         name = "Puppy",
         streaming = true,
         content = msg_received["llmmsg"]
     }
-    table.insert(chat_dialog_table, user_chat_table)
     table.insert(chat_dialog_table, llm_chat_table)
     for key, char in pairs(chat_dialog_table) do
         chat_dialog_table[key]["streaming"] = false
@@ -256,7 +300,6 @@ function x_ne_func(i)
     return -i
 end
 
-
 function deepCompareTable(tbl1, tbl2)
     if tbl1 == tbl2 then
         return true
@@ -304,6 +347,15 @@ function findNextSpaceIndex(tbl, index)
     end
     return -1
   end
+
+function stringToTable(s)
+    local t = {}
+    for i = 1, #s do
+        t[i] = s:sub(i, i)
+    end
+    return t
+end
+
 
 --------------------------------------------
 
@@ -645,8 +697,28 @@ P_STAGE["terminal_input"] = function()
     else
         if not zh_ime:isUserDiscard() and #chat_user_input > 0 then
             puppy_communication:get_llm_response(table.concat(chat_user_input, ""), start_new_chat_trigger)
+            local user_chat_table_temp = {
+                name = "You",
+                streaming = false,
+                content = chat_user_input
+            }
+            table.insert(chat_dialog_table, user_chat_table_temp)
+            
             start_new_chat_trigger = false
             state_wait_respond = true
+        end
+        p_stage_manager = "terminal"
+        enter_terminal()
+    end
+end
+
+P_STAGE["edit_server_address"] = function()
+    if zh_ime:isRunning() then
+        chat_user_input = zh_ime:update()
+    else
+        if not zh_ime:isUserDiscard() and #chat_user_input > 0 then
+            server_address = table.concat(chat_user_input, "")
+            save_state()
         end
         p_stage_manager = "terminal"
         enter_terminal()
@@ -670,6 +742,7 @@ function exit_puppy()
 end
 
 function enter_terminal()
+    puppy_sidebar_option()
     chat_sprite:setCenter(0,0)
     chat_sprite:moveTo(0, 5)
     chat_sprite:add()
@@ -687,6 +760,7 @@ function enter_terminal()
 end
 
 function enter_puppy()
+    puppy_sidebar_option()
     battery_text_sprite:add()
     battery_text_sprite:moveTo((screenWidth/2)+110, screenHeight/2)
     time_sprite:add()
@@ -733,6 +807,7 @@ end
 
 function init()
     pd.display.setRefreshRate(30)
+    load_state()
 
     gfx.setBackgroundColor(gfx.kColorBlack)
     gfx.setColor(gfx.kColorBlack)
