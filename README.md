@@ -1,3 +1,4 @@
+![header.jpg](https://github.com/Antonoko/playdate-chinese-IME/blob/main/__asset__/header.jpg?raw=true)
 # Puppy
 
 A LLM interface that pays homage to rabbit r1 on Playdate.
