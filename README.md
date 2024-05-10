@@ -30,10 +30,6 @@ A LLM interface that pays homage to rabbit r1 on Playdate.
 ## how to use
 - hold down button and rotate playdate to change modes
 
-## todo
-- [ ] make server_address could be change on app rather than hard-coding it into the program
-- [ ] fix welcome msg blink
-
 ## Big thanks to
 - [pd-usb](https://github.com/cranksters/pd-usb)
 - [pdportal](https://github.com/strawdynamics/pdportal)
