@@ -580,7 +580,7 @@ function render_chat_stream_part(response_json)
             gfx.setImageDrawMode(playdate.graphics.kDrawModeFillWhite)
             gfx.drawTextAligned(char, img_chat_streaming_text_x + img_chat_draw_coord_x_offset, img_chat_streaming_text_y, kTextAlignment.left)
             img_chat_streaming_text_x += gfx.getTextSize(char)
-            SFX.selection.key:play()
+            SFX.key.sound:play()
         end
         
         img_chat_streaming_text_x_last = img_chat_streaming_text_x
@@ -703,6 +703,11 @@ P_STAGE["terminal_input"] = function()
                 content = chat_user_input
             }
             table.insert(chat_dialog_table, user_chat_table_temp)
+            for key, char in pairs(chat_dialog_table) do
+                chat_dialog_table[key]["streaming"] = false
+            end
+            reset_chat_render()
+            update_chat_render(chat_dialog_table)
             
             start_new_chat_trigger = false
             state_wait_respond = true
