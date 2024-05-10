@@ -1,6 +1,6 @@
 # Puppy
 
-This is an LLM interface that pays homage to rabbit r1 on Playdate.
+A LLM interface that pays homage to rabbit r1 on Playdate.
 
 > [!WARNING]
 > The project is in the early and experimental stages and may be very unstable and unavailable.
