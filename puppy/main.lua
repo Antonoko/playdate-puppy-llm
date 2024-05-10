@@ -402,6 +402,9 @@ function init_calc_chat_img(response_json)
         height += 20 --buffer
     end
 
+    if height < screenHeight - 30 then
+        height = screenHeight
+    end
     img_chat_buffer = gfx.image.new(screenWidth, height)
 end
 
