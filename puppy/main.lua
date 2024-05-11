@@ -18,6 +18,9 @@ local zh_ime = IME()
 
 local LINEHEIGHT_FACTOR <const> = 1.4
 
+local IMG_ABOUT <const> = gfx.image.new("img/about")
+pd.setMenuImage(IMG_ABOUT)
+
 local P_STAGE = {}
 local p_stage_manager = "puppy"
 local p_stage_manager_choose = "puppy"
