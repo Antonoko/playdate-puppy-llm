@@ -144,6 +144,7 @@ end
 
 
 function puppy_sidebar_option()
+    puppy_menu:removeAllMenuItems()
     local modeMenuItem, error = puppy_menu:addMenuItem("edit address", function(value)
         p_stage_manager = "edit_server_address"
         zh_ime:startRunning("Edit Server Address", "en", stringToTable(server_address), "num")
@@ -345,11 +346,15 @@ function findNextSpaceIndex(tbl, index)
     end
     for i = index + 1, #tbl do
         if tbl[i] == " " then
-            return i
+            if i > 12 then
+                return -1
+            else
+                return i
+            end
         end
     end
     return -1
-  end
+end
 
 function stringToTable(s)
     local t = {}
